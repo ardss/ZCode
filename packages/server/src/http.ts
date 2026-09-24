@@ -173,12 +173,35 @@ function isLoopbackAddress(address: string | undefined): boolean {
   return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
 }
 
-/** 是否为匿名请求（未配置 authToken 时的本机来源判断，用 TCP 对端地址而非 Host 头）。 */
 function isLoopbackRequest(c: Context): boolean {
   const remote =
     (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket
       ?.remoteAddress ?? undefined;
   return isLoopbackAddress(remote);
+}
+
+/**
+ * 匿名信任判定（未配置 authToken 时的 host capability 签发来源约束）。
+ * 仅凭 TCP 对端为回环是不够的：经本机代理（如 Vite dev proxy）转发时，
+ * 服务端看到的 TCP 对端必是代理进程（回环地址），真实来源被代理隐藏——
+ * 这会把"仅本机可匿名签发"的信任边界静默扩大到整个私网。因此还要求
+ * X-Forwarded-For 链路上每一跳都是回环；代理需配置 xfwd 透传真实来源
+ * （见 packages/web/vite.config.ts 的 proxy），否则一律拒绝（fail closed）。
+ */
+function isTrustedAnonymousRequest(c: Context): boolean {
+  if (!isLoopbackRequest(c)) {
+    return false;
+  }
+  const forwarded = c.req
+    .header("x-forwarded-for")
+    ?.split(",")
+    .map((hop) => hop.trim())
+    .filter(Boolean);
+  if (!forwarded || forwarded.length === 0) {
+    return true;
+  }
+  // 校验全链路而非首跳，防止客户端伪造 XFF 首跳绕过。
+  return forwarded.every(isLoopbackAddress);
 }
 
 function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
@@ -336,9 +359,10 @@ export function createHttpServer(
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   // host capability 是提升为 trusted host 的凭据，收紧签发：配置了 authToken 时
   // 由上面的 token 中间件覆盖（/api/ 属于 isTokenProtectedPath）；未配置 authToken
-  // 时仅允许本机 loopback 来源匿名签发。
+  // 时仅允许本机 loopback 来源匿名签发，且经代理转发的请求必须透传回环链路
+  // （isTrustedAnonymousRequest 校验 X-Forwarded-For），防止 dev 代理把私网来源洗成回环。
   app.post("/api/rpc-host-capability", (c) => {
-    if (!authToken && !isLoopbackRequest(c)) {
+    if (!authToken && !isTrustedAnonymousRequest(c)) {
       return c.json({ error: "Forbidden" }, 403);
     }
     return c.json(hostCapabilities.issue());

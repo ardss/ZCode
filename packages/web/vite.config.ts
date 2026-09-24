@@ -50,14 +50,12 @@ export default defineConfig(({ mode }) => {
         .map((host) => host.trim())
         .filter(Boolean)
     : [".local", ".lan", ".internal", ".private"];
-  // 构建期仅显式覆盖 endpoint（env / .env 注入）时才烘焙 origin；否则留空，
+  // 构建期仅显式覆盖 endpoint（VITE_ 前缀 env / .env 注入）时才烘焙 origin；否则留空，
   // 让运行时代码回退到当前部署同源，避免把线上域名烘焙进内网部署包。
+  // 注意：只认 VITE_ 前缀——打包机 shell 可能带 ZCODE_BASE_URL 等通用名环境变量
+  // （如由 ZCode 桌面端注入），把通用名当作"显式覆盖"会静默破坏"未配置即同源"的预期。
   const explicitEndpointOrigin =
-    env.VITE_ZCODE_BASE_URL?.trim() ||
-    env.VITE_ZCODE_ENDPOINT_ORIGIN?.trim() ||
-    env.ZCODE_BASE_URL?.trim() ||
-    env.ZCODE_ENDPOINT_ORIGIN?.trim() ||
-    "";
+    env.VITE_ZCODE_BASE_URL?.trim() || env.VITE_ZCODE_ENDPOINT_ORIGIN?.trim() || "";
 
   return {
     plugins: [pdfJsCMapsPlugin(), react(), tailwindcss(), thirdPartyNoticesVitePlugin()],
@@ -87,9 +85,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
         },
-        // 将 /ws 和 /api 请求代理到 server（VITE_SERVER_ORIGIN 可覆盖，默认本地 3030）
-        "/ws": { target: lanServerWsTarget, ws: true },
-        "/api": { target: lanServerHttpTarget },
+        // 将 /ws 和 /api 请求代理到 server（VITE_SERVER_ORIGIN 可覆盖，默认本地 3030）。
+        // 安全约束：必须 xfwd 透传真实来源——代理对 server 发起的是新的本地 TCP 连接，
+        // 不透传的话服务端只能看到回环对端，会把私网设备经代理的匿名请求误判为本机
+        // （server 端匿名 host capability 签发据此校验 X-Forwarded-For，见 http.ts）。
+        "/ws": { target: lanServerWsTarget, ws: true, xfwd: true },
+        "/api": { target: lanServerHttpTarget, xfwd: true },
       },
     },
     optimizeDeps: {

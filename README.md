@@ -109,8 +109,11 @@ Web 模式默认工作目录为当前目录，监听 `127.0.0.1`，默认不启�
 把 Web 界面暴露给局域网有三种路径，边界与安全要求各不相同：
 
 1. **dev 模式（仅限可信内网）**：`pnpm dev:web` 的 Vite dev server 固定监听 `0.0.0.0:5173`（见 `packages/web/vite.config.ts` 的 `server.host: true`），同一私网内其他设备可直接访问，dev server 本身没有任何认证，因此只允许在可信内网使用。浏览器端若需走远程登录流程，必须设置 `VITE_DEV_ORIGIN` 指定同源服务地址，且仅当 `VITE_WEB_REMOTE_ALLOW_DEV_RETURN_TO=true` 时才允许登录后回跳 dev 地址。
+   - **host 校验**：默认放行 IP、`localhost` 及 `.local` / `.lan` / `.internal` / `.private` 后缀主机名。用无后缀的裸计算机名访问（如 Windows 计算机名 `http://mypc:5173`）会被 Vite 的 host 校验中间件 403，需把该名字加入 `VITE_DEV_ALLOWED_HOSTS`（逗号分隔），或统一改用 IP / `.local` 地址访问。
 2. **官方发行包**：`zcode --web --host 0.0.0.0`。监听非本机地址时会自动生成访问令牌，请使用终端输出的带令牌链接；可用 `--token` 指定令牌，`--no-token` 关闭（不建议对非 loopback 地址关闭）。
 3. **自部署 entry-http**：直接运行 `packages/server` 的 HTTP 入口时，默认仅绑定 `127.0.0.1`；绑定非 loopback 地址（如设置 `ZCODE_SERVER_HOST=0.0.0.0`）必须同时设置 `ZCODE_SERVER_AUTH_TOKEN`，否则拒绝启动。生产部署建议保持 `ZCODE_SERVER_HOST=127.0.0.1`，由反向代理（Nginx 等）对外暴露并统一做 TLS 与访问控制。
+
+**远程登录与 redirect_uri**：Web 端默认把当前部署同源（如 `http://<内网IP>:5173/cn/share/callback`）作为 OAuth `redirect_uri`。OAuth 提供方通常按精确匹配校验已登记的 `redirect_uri` 且可能要求 `https`——未登记的私网 `http` 地址可能被授权页或 token 交换拒绝（400/mismatch）。内网部署若需远程登录，要么在 OAuth 提供方登记实际使用的回调地址，要么在构建期显式设置 `VITE_ZCODE_BASE_URL` 指向已登记的 origin。授权请求与 token 交换使用的是同一份 `redirect_uri` 配置（`packages/web/src/auth/webZaiOAuthConfig.ts` 的 `redirectUri` / `shareRedirectUri`）。
 
 **`?token=` 换 cookie**：认证只保护 `/ws` 和 `/api` 路径。首次访问时在 URL 上携带 `?token=<令牌>`（如 `http://<主机>:3030/?token=...`），服务端校验通过后通过 `Set-Cookie` 下发 `zcode_lite_token`（HttpOnly、SameSite=Lax），后续请求改用 cookie 认证，无需再带 `?token=`。
 

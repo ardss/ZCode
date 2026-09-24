@@ -3,8 +3,12 @@ import { DEFAULT_ZCODE_ENDPOINT_ORIGIN } from "@zcode/shared";
 const PRODUCTION_WEB_ORIGIN = DEFAULT_ZCODE_ENDPOINT_ORIGIN;
 const WEB_CALLBACK_PATHS = new Set(["/cn/share/callback", "/share/callback"]);
 const SHARE_PATH_PATTERN = /^\/(?:cn\/share|share)\/[A-Za-z0-9._~-]{1,512}$/u;
+// 局域网适配：与 vite.config.ts 的 allowedHosts 默认后缀（.local/.lan/.internal/.private）
+// 对齐，除 localhost/私网 IPv4 外同时放行 IPv6 回环/私网（[::1]、fc00::/7、fe80::/10，
+// URL 中 IPv6 必须带方括号）和私网主机名，否则用 mypc.local 这类地址访问 dev server 时
+// 远程登录回跳会被静默拒绝。
 const PRIVATE_DEV_RETURN_TO_PATTERN =
-  /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?(\/|$)/;
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[(?:[fd][0-9a-f]{2}|fe80)[:0-9a-f.]+\]|[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|internal|private))(:\d+)?(\/|$)/i;
 
 interface OAuthStatePayload {
   nonce: string;
