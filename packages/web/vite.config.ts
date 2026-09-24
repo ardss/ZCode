@@ -38,6 +38,27 @@ export default defineConfig(({ mode }) => {
   // ZAI OAuth client_id 是公开标识，允许注入浏览器包；secret/token 不得走 VITE_。
   const zaiOAuthClientId = resolveZaiOAuthClientId(endpointEnv);
 
+  // 局域网适配：/ws 与 /api 代理目标可由 VITE_SERVER_ORIGIN 覆盖，默认本地 3030。
+  const lanServerOrigin = (env.VITE_SERVER_ORIGIN?.trim() || "localhost:3030").replace(/\/+$/u, "");
+  const lanServerHttpTarget = /^https?:\/\//u.test(lanServerOrigin)
+    ? lanServerOrigin
+    : `http://${lanServerOrigin}`;
+  const lanServerWsTarget = lanServerHttpTarget.replace(/^http/u, "ws");
+  // 允许私网主机名访问 dev server；可用 VITE_DEV_ALLOWED_HOSTS（逗号分隔）覆盖或留空收紧。
+  const allowedHosts = env.VITE_DEV_ALLOWED_HOSTS
+    ? env.VITE_DEV_ALLOWED_HOSTS.split(",")
+        .map((host) => host.trim())
+        .filter(Boolean)
+    : [".local", ".lan", ".internal", ".private"];
+  // 构建期仅显式覆盖 endpoint（env / .env 注入）时才烘焙 origin；否则留空，
+  // 让运行时代码回退到当前部署同源，避免把线上域名烘焙进内网部署包。
+  const explicitEndpointOrigin =
+    env.VITE_ZCODE_BASE_URL?.trim() ||
+    env.VITE_ZCODE_ENDPOINT_ORIGIN?.trim() ||
+    env.ZCODE_BASE_URL?.trim() ||
+    env.ZCODE_ENDPOINT_ORIGIN?.trim() ||
+    "";
+
   return {
     plugins: [pdfJsCMapsPlugin(), react(), tailwindcss(), thirdPartyNoticesVitePlugin()],
     resolve: {
@@ -55,6 +76,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // 局域网适配：监听所有网卡，允许同一私网内其他设备访问 dev server。
+      host: true,
+      allowedHosts,
       proxy: {
         // Web 登录本地调试时，OAuth token 交换必须先命中线上同源接口。
         // 该专用代理放在 `/api` 通配代理之前，避免被转发到本地 server 导致 404。
@@ -63,9 +87,9 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
         },
-        // 将 /ws 和 /api 请求代理到 server（默认 3030 端口）
-        "/ws": { target: "ws://localhost:3030", ws: true },
-        "/api": { target: "http://localhost:3030" },
+        // 将 /ws 和 /api 请求代理到 server（VITE_SERVER_ORIGIN 可覆盖，默认本地 3030）
+        "/ws": { target: lanServerWsTarget, ws: true },
+        "/api": { target: lanServerHttpTarget },
       },
     },
     optimizeDeps: {
@@ -86,9 +110,10 @@ export default defineConfig(({ mode }) => {
       __ZCODE_VERSION__: JSON.stringify(version),
       __ZCODE_COMMIT__: JSON.stringify(env.ZCODE_COMMIT || "unknown"),
       __ZCODE_ENV__: JSON.stringify(zcodeEnv),
-      "import.meta.env.VITE_ZCODE_BASE_URL": JSON.stringify(zcodeEndpointOrigin),
+      "import.meta.env.VITE_ZCODE_BASE_URL": JSON.stringify(explicitEndpointOrigin),
       // 兼容旧 Web runtime 读取名；新代码统一读 VITE_ZCODE_BASE_URL。
-      "import.meta.env.VITE_ZCODE_ENDPOINT_ORIGIN": JSON.stringify(zcodeEndpointOrigin),
+      // 未显式配置时注入空串，运行时回退当前部署同源（见 explicitEndpointOrigin 注释）。
+      "import.meta.env.VITE_ZCODE_ENDPOINT_ORIGIN": JSON.stringify(explicitEndpointOrigin),
       // 明确注入 OAuth 公开配置，避免 Web 端在不同 mode 下隐式依赖源码 fallback。
       "import.meta.env.VITE_ZAI_OAUTH_CLIENT_ID": JSON.stringify(zaiOAuthClientId),
       "import.meta.env.VITE_ZAI_OAUTH_ORIGIN": JSON.stringify(zaiOAuthOrigin),

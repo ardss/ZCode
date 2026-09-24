@@ -133,6 +133,7 @@ async function renderConversationSharePage(): Promise<void> {
     return;
   }
 
+  // 局域网适配：分享页默认走当前部署同源；VITE_ZCODE_BASE_URL 仅在构建期显式配置时覆盖。
   const endpointOrigin =
     import.meta.env.VITE_ZCODE_BASE_URL?.trim().replace(/\/+$/u, "") || window.location.origin;
   const mockMode =

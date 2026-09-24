@@ -166,6 +166,21 @@ function resolveServerWorkspaces(options: HttpServerOptions): ServerRemoteWorksp
   ];
 }
 
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) {
+    return false;
+  }
+  return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+}
+
+/** 是否为匿名请求（未配置 authToken 时的本机来源判断，用 TCP 对端地址而非 Host 头）。 */
+function isLoopbackRequest(c: Context): boolean {
+  const remote =
+    (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket
+      ?.remoteAddress ?? undefined;
+  return isLoopbackAddress(remote);
+}
+
 function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
   return {
     serverId: resolveServerId(options),
@@ -174,7 +189,8 @@ function createServerInfo(options: HttpServerOptions): ServerRemoteInfo {
       : {}),
     version: ZCODE_VERSION,
     protocolVersion: SERVER_REMOTE_PROTOCOL_VERSION,
-    authRequired: options.authRequired ?? Boolean(readTrimmedEnv("ZCODE_SERVER_TOKEN")),
+    // 统一读 ZCODE_SERVER_AUTH_TOKEN（与 entry-http.ts 同名），旧名 ZCODE_SERVER_TOKEN 已废弃。
+    authRequired: options.authRequired ?? Boolean(readTrimmedEnv("ZCODE_SERVER_AUTH_TOKEN")),
     workspaces: resolveServerWorkspaces(options),
     capabilities: {
       desktopContinuous: true,
@@ -318,7 +334,15 @@ export function createHttpServer(
   }
 
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
-  app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
+  // host capability 是提升为 trusted host 的凭据，收紧签发：配置了 authToken 时
+  // 由上面的 token 中间件覆盖（/api/ 属于 isTokenProtectedPath）；未配置 authToken
+  // 时仅允许本机 loopback 来源匿名签发。
+  app.post("/api/rpc-host-capability", (c) => {
+    if (!authToken && !isLoopbackRequest(c)) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+    return c.json(hostCapabilities.issue());
+  });
 
   // 普通 `/ws` 永远是 terminal-client；浏览器/任意客户端设置旧 mode header
   // 都不能再把自己提升为 trusted host。
@@ -466,7 +490,12 @@ export function createHttpServer(
   const server = serve({ fetch: app.fetch, hostname: options.host, port }, () => {
     const address = server.address();
     const listenPort = typeof address === "object" && address ? address.port : port;
-    const listenHost = options.host?.trim() || "localhost";
+    // 打印真实绑定地址：options.host 未显式给定时 @hono/node-server 实际绑在
+    // :: 或 0.0.0.0，直接读 server.address() 而不是回退成误导性的 "localhost"。
+    const listenHost =
+      typeof address === "object" && address && address.address
+        ? address.address
+        : options.host?.trim() || "0.0.0.0";
     log(`http://${listenHost}:${listenPort}`);
   });
 

@@ -100,7 +100,12 @@ export function resolveSafeAppReturnTo(
   const currentOrigin = options.currentOrigin ?? getCurrentOrigin();
   const allowedOrigin = resolveAllowedAppReturnOrigin(currentOrigin);
   if (url.origin !== allowedOrigin) {
-    return null;
+    // 局域网适配：非生产构建放行私网段（localhost/10/172.16-31/192.168）的 return-to；
+    // 生产构建保持严格同源校验，行为不变。
+    const allowPrivateDev = import.meta.env?.DEV === true;
+    if (!(allowPrivateDev && PRIVATE_DEV_RETURN_TO_PATTERN.test(url.toString()))) {
+      return null;
+    }
   }
 
   return url.pathname;

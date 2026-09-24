@@ -42,13 +42,22 @@ function buildBigModelAuthorizeUrl(origin: string | undefined): string {
   return `${trimmed ? new URL(trimmed).origin : resolveBigModelApiOrigin({})}/login`;
 }
 
+// 运行时当前部署同源；无 window（SSR/测试）时返回空串，由调用方兜底。
+function resolveRuntimeWebOrigin(): string {
+  const origin = globalThis.window?.location?.origin;
+  return origin && origin !== "null" ? origin : "";
+}
+
 function createWebZaiOAuthConfig(env: WebImportMetaEnv = {}): WebZaiOAuthConfig {
   const devOrigin = env.VITE_DEV_ORIGIN?.trim().replace(/\/$/, "");
-  const zcodeEndpointUrls = buildZCodeEndpointUrls(
+  // redirectUri 去烘焙：优先当前部署同源（局域网/内网部署场景），
+  // 构建期 VITE_ env 仅作显式覆盖；都拿不到再兜底线上默认 origin。
+  const endpointOrigin =
     env.VITE_ZCODE_BASE_URL?.trim() ||
-      env.VITE_ZCODE_ENDPOINT_ORIGIN?.trim() ||
-      DEFAULT_ZCODE_ENDPOINT_ORIGIN,
-  );
+    env.VITE_ZCODE_ENDPOINT_ORIGIN?.trim() ||
+    resolveRuntimeWebOrigin() ||
+    DEFAULT_ZCODE_ENDPOINT_ORIGIN;
+  const zcodeEndpointUrls = buildZCodeEndpointUrls(endpointOrigin);
 
   return {
     // ZAI 当前 OAuth 授权入口使用 /api/oauth 前缀，继续走 /auth/oauth 会打开旧入口。

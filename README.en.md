@@ -98,6 +98,16 @@ In Web mode, it uses the current directory as the workspace, listens on `127.0.0
 
 When starting the general Web service's HTTP entry directly, configure API/WebSocket authentication with `ZCODE_SERVER_AUTH_TOKEN`. When creating the service programmatically, use the `authToken` option.
 
+### LAN / Intranet Access
+
+There are three paths to expose the Web interface to a LAN, each with different boundaries and security requirements:
+
+1. **Dev mode (trusted intranet only)**: the Vite dev server started by `pnpm dev:web` always binds to `0.0.0.0:5173` (see `server.host: true` in `packages/web/vite.config.ts`), so other devices on the same private network can reach it directly. The dev server has no authentication of its own, so use it on trusted intranets only. For the remote login flow in the browser, set `VITE_DEV_ORIGIN` to the same-origin service address; returning to the dev address after login is allowed only when `VITE_WEB_REMOTE_ALLOW_DEV_RETURN_TO=true`.
+2. **Official distribution**: `zcode --web --host 0.0.0.0`. Listening on a non-local address generates an access token automatically; use the token-bearing URL printed in the terminal. Set a token with `--token`, or disable authentication with `--no-token` (not recommended for non-loopback addresses).
+3. **Self-hosted entry-http**: the HTTP entry of `packages/server` binds to `127.0.0.1` by default; binding to a non-loopback address (e.g. `ZCODE_SERVER_HOST=0.0.0.0`) requires `ZCODE_SERVER_AUTH_TOKEN` to be set, otherwise startup is refused. For production, keep `ZCODE_SERVER_HOST=127.0.0.1` and expose the service through a reverse proxy (Nginx etc.) that handles TLS and access control.
+
+**`?token=` to cookie exchange**: authentication protects only `/ws` and `/api` paths. On first visit, append `?token=<token>` to the URL (e.g. `http://<host>:3030/?token=...`); once verified, the server issues a `zcode_lite_token` cookie (HttpOnly, SameSite=Lax) via `Set-Cookie`, and subsequent requests authenticate with the cookie instead of the query parameter.
+
 See Packaging below for build instructions. `pnpm build:zcode` only creates the distribution; it does not replace an existing `zcode` on `PATH`. If the command still points to an older installation or another checkout, check it with `command -v zcode` on macOS / Linux or `where.exe zcode` on Windows.
 
 ### CLI Source Development

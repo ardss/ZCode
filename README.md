@@ -104,6 +104,16 @@ Web 模式默认工作目录为当前目录，监听 `127.0.0.1`，默认不启�
 
 直接启动通用 Web 服务的 HTTP 入口时，通过 `ZCODE_SERVER_AUTH_TOKEN` 配置 API／WebSocket 认证；通过程序接口创建服务时，使用 `authToken` 选项。
 
+### 局域网 / 内网访问
+
+把 Web 界面暴露给局域网有三种路径，边界与安全要求各不相同：
+
+1. **dev 模式（仅限可信内网）**：`pnpm dev:web` 的 Vite dev server 固定监听 `0.0.0.0:5173`（见 `packages/web/vite.config.ts` 的 `server.host: true`），同一私网内其他设备可直接访问，dev server 本身没有任何认证，因此只允许在可信内网使用。浏览器端若需走远程登录流程，必须设置 `VITE_DEV_ORIGIN` 指定同源服务地址，且仅当 `VITE_WEB_REMOTE_ALLOW_DEV_RETURN_TO=true` 时才允许登录后回跳 dev 地址。
+2. **官方发行包**：`zcode --web --host 0.0.0.0`。监听非本机地址时会自动生成访问令牌，请使用终端输出的带令牌链接；可用 `--token` 指定令牌，`--no-token` 关闭（不建议对非 loopback 地址关闭）。
+3. **自部署 entry-http**：直接运行 `packages/server` 的 HTTP 入口时，默认仅绑定 `127.0.0.1`；绑定非 loopback 地址（如设置 `ZCODE_SERVER_HOST=0.0.0.0`）必须同时设置 `ZCODE_SERVER_AUTH_TOKEN`，否则拒绝启动。生产部署建议保持 `ZCODE_SERVER_HOST=127.0.0.1`，由反向代理（Nginx 等）对外暴露并统一做 TLS 与访问控制。
+
+**`?token=` 换 cookie**：认证只保护 `/ws` 和 `/api` 路径。首次访问时在 URL 上携带 `?token=<令牌>`（如 `http://<主机>:3030/?token=...`），服务端校验通过后通过 `Set-Cookie` 下发 `zcode_lite_token`（HttpOnly、SameSite=Lax），后续请求改用 cookie 认证，无需再带 `?token=`。
+
 构建方式见下方打包章节。`pnpm build:zcode` 只生成发行包，不会替换 `PATH` 中已有的 `zcode`。如果命令仍指向旧安装或其他源码目录，macOS / Linux 可用 `command -v zcode` 检查，Windows 可用 `where.exe zcode` 检查。
 
 ### CLI 源码开发
